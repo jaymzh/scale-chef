@@ -7,7 +7,7 @@ node.default['scale_chef_client']['role_dir'] =
   '/var/chef/repo/roles'
 
 if node.vagrant?
-  node.default['scale_sudo']['users']['vagrant'] = 'ALL=NOPASSWD: ALL'
+  node.default['fb_sudo']['users']['vagrant'] = 'ALL=NOPASSWD: ALL'
 end
 
 d = {}
@@ -69,9 +69,8 @@ node.default['scale_datadog']['monitors']['postfix'] = {
   }],
 }
 
-node.default['scale_sudo']['users']['dd-agent'] =
-  'ALL=(ALL) NOPASSWD:/usr/bin/find /var/spool/postfix/ -type f, ' +
-  '/bin/find /var/spool/postfix/ -type f'
+node.default['fb_sudo']['users']['dd-agent'] =
+  'ALL=(ALL) NOPASSWD:/usr/bin/find /var/spool/postfix/incoming -type f'
 
 d = {}
 if File.exists?('/etc/lists_secrets')
