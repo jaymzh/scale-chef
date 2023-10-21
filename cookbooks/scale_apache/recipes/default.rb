@@ -10,6 +10,22 @@
 include_recipe 'scale_apache::common'
 include_recipe 'fb_apache'
 
+apache_debug_log = '/var/log/apache_status.log'
+if node['hostname'] == 'scale-web2'
+  cron 'ugly restarts' do
+    # once every other hour
+    minute '02'
+    hour '*/2'
+    command "date >> #{apache_debug_log}; " +
+      "ps auxwww | grep http >> #{apache_debug_log}; " +
+      '/usr/bin/systemctl restart httpd'
+  end
+end
+
+node.default['fb_logrotate']['configs']['apache_status'] = {
+  'files' => [apache_debug_log],
+}
+
 common_config = {
   'ServerName' => 'www.socallinuxexpo.org',
   'ServerAdmin' => 'webmaster@socallinuxexpo.org',
@@ -34,9 +50,7 @@ common_config = {
   },
   'Location /server-status' => {
     'SetHandler' => 'server-status',
-    'Order' => 'Deny,Allow',
-    'Deny' => 'from all',
-    'Allow' => 'from localhost',
+    'Require' => 'local',
   },
 }
 
@@ -45,7 +59,21 @@ node.default['fb_apache']['sites']['*:80'] = common_config.merge({
     'https://www.socallinuxexpo.org/',
 })
 
-node.default['fb_apache']['extra_configs']['MaxConnectionsPerChild'] = 15
+node.default['fb_apache']['extra_configs']['MaxConnectionsPerChild'] = 50
+node.default['fb_apache']['extra_configs']['MaxRequestWorkers'] = 50
+
+# With event, increase this directive if the process number defined by your
+# MaxRequestWorkers and ThreadsPerChild settings, plus the number of gracefully
+# shutting down processes, is more than 16 server processes (default).
+#
+# Our MaxRequestWorkers is 50. We don't define ThreadsPerChild which defaults
+# to 25. So if I read that correctly (and I haven't tuned Apache for a living
+# in a looonnnggg time), we want something like 50+25=75 plus some more for
+# shutting down processes, so like... 80?
+node.default['fb_apache']['extra_configs']['ServerLimit'] = 80
+
+# see if this helps with hung processes...
+node.default['fb_apache']['extra_configs']['KeepAlive'] = 'off'
 
 base_config = common_config.merge({
   'Alias' => [
@@ -239,12 +267,18 @@ pkgs = %w{
   git
   php
   php-gd
-  php-mysql
   php-pdo
   php-xml
   php-mbstring
-  python2-boto
 }
+if node.centos7?
+  pkgs << 'python2-boto'
+  pkgs << 'php-mysql'
+else
+  pkgs << 'python3-boto3'
+  pkgs << 'php-mysqlnd'
+  pkgs << 'php-json'
+end
 
 if node.centos8?
   node.default['fb_dnf']['modules']['httpd'] = {
@@ -300,7 +334,14 @@ node.default['scale_datadog']['monitors']['apache'] = {
       "type" => "file",
       "path" => "/var/log/httpd/error.log",
       "source" => "apache",
-      "sourcecategory" => "http_web_access",
+      "sourcecategory" => "http_web_error",
+      "service" => "apache"
+    },
+    {
+      "type" => "file",
+      "path" => "/var/log/httpd/error_log",
+      "source" => "apache",
+      "sourcecategory" => "http_web_error",
       "service" => "apache"
     },
     {
@@ -321,7 +362,14 @@ node.default['scale_datadog']['monitors']['apache'] = {
       "type" => "file",
       "path" => "/var/log/httpd/ssl_error_log",
       "source" => "apache",
-      "sourcecategory" => "http_web_access",
+      "sourcecategory" => "http_web_error",
+      "service" => "apache"
+    },
+    {
+      "type" => "file",
+      "path" => "/var/log/httpd/ssl_error.log",
+      "source" => "apache",
+      "sourcecategory" => "http_web_error",
       "service" => "apache"
     },
   ]

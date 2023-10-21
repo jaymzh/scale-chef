@@ -58,6 +58,7 @@ pkgs = %w{
 
 if node.centos7?
   pkgs += %w{
+    awscli
     php-mysql
     python-dns
     python2-boto
@@ -97,6 +98,13 @@ cookbook_file '/var/www/html/index.html' do
   owner 'root'
   group 'root'
   mode '0644'
+end
+
+cookbook_file '/usr/lib/mailman/bin/list_requests' do
+  source 'list_requests'
+  owner 'root'
+  group 'mailman'
+  mode '0755'
 end
 
 if node.centos7?
