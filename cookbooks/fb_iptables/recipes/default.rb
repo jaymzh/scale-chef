@@ -17,45 +17,30 @@
 # limitations under the License.
 #
 
-unless node.centos? || node.fedora? || node.ubuntu?
-  fail 'fb_iptables is only supported on CentOS, Fedora, and Ubuntu'
+unless ::ChefUtils.fedora_derived || ::ChefUtils.debian?
+  fail 'fb_iptables is only supported on fedora- or debian- derived distros'
 end
 
-services = value_for_platform(
-  'ubuntu' => { :default => %w{netfilter-persistent} },
-  :default => %w{iptables ip6tables},
-)
-iptables_config_dir = value_for_platform(
-  'ubuntu' => { :default => '/etc/iptables' },
-  :default => '/etc/sysconfig',
-)
-iptables_rule_file = value_for_platform(
-  'ubuntu' => { :default => 'rules.v4' },
-  :default => 'iptables',
-)
-ip6tables_rule_file = value_for_platform(
-  'ubuntu' => { :default => 'rules.v6' },
-  :default => 'ip6tables',
-)
+if ::ChefUtils.debian?
+  ipt_services = %w{netfilter-persistent}
+  ipt_config_dir = '/etc/iptables'
+  ipt_rule_file = 'rules.v4'
+  ipt6_rule_file = 'rules.v6'
+
+  nft_serices = %w{nftables}
+  nft_rules_file = '/etc/nftables.conf'
+else
+  ipt_services = %w{netfilter-persistent}
+  ipt_config_dir = '/etc/iptables'
+  ipt_rule_file = 'rules.v4'
+  ipt6_rule_file = 'rules.v6'
+
+  nft_serices = %w{nftables}
+  nft_rules_file = '/etc/sysconfig/nftables.conf'
+end
+
 iptables_rules = ::File.join(iptables_config_dir, iptables_rule_file)
 ip6tables_rules = ::File.join(iptables_config_dir, ip6tables_rule_file)
-
-# firewalld/ufw conflicts with direct iptables management
-conflicting_package = value_for_platform(
-  'ubuntu' => { :default => 'ufw' },
-  :default => 'firewalld',
-)
-
-service conflicting_package do
-  only_if { node['fb_iptables']['manage_packages'] }
-  action [:stop, :disable]
-end
-
-package conflicting_package do
-  only_if { node['fb_iptables']['manage_packages'] }
-  options '--exclude kernel*' if node.fedora?
-  action :remove
-end
 
 include_recipe 'fb_iptables::packages'
 
@@ -93,6 +78,7 @@ cookbook_file '/usr/sbin/fb_iptables_reload' do
 end
 
 template "#{iptables_config_dir}/iptables-config" do
+  not_if { node['fb_iptables']['use_nft'] }
   owner node.root_user
   group node.root_group
   mode '0640'
@@ -100,6 +86,7 @@ template "#{iptables_config_dir}/iptables-config" do
 end
 
 template iptables_rules do
+  not_if { node['fb_iptables']['use_nft'] }
   source 'iptables.erb'
   owner node.root_user
   group node.root_group
@@ -122,6 +109,7 @@ template iptables_rules do
 end
 
 template "#{iptables_config_dir}/ip6tables-config" do
+  not_if { node['fb_iptables']['use_nft'] }
   source 'iptables-config.erb'
   owner node.root_user
   group node.root_group
@@ -130,6 +118,7 @@ template "#{iptables_config_dir}/ip6tables-config" do
 end
 
 template ip6tables_rules do
+  not_if { node['fb_iptables']['use_nft'] }
   source 'iptables.erb'
   owner node.root_user
   group node.root_group
@@ -144,4 +133,22 @@ template ip6tables_rules do
     end
   end
   notifies :run, 'execute[reload ip6tables]', :immediately
+end
+
+template nftables_rules do
+  only_if { node['fb_iptables']['use_nft'] }
+  source 'nftables.erb'
+  owner node.root_user
+  group node.root_group
+  mode '0640'
+  variables(:ip => 6)
+  verify do |path|
+    # See comment ip iptables_rules
+    if FB::Iptables.iptables_active?(6)
+      shell_out("/sbin/ip6tables-restore --test #{path}").exitstatus.zero?
+    else
+      true
+    end
+  end
+  notifies :run, 'execute[reload nftables]', :immediately
 end

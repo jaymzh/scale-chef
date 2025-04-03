@@ -17,7 +17,7 @@
 #
 
 module FB
-  module Iptables
+  class Iptables
     # rubocop:disable Style/MutableConstant
     # We let this particular constant remain mutable in case we need to shove in
     # a nat table or something.
@@ -27,6 +27,22 @@ module FB
       'raw' => %w{PREROUTING OUTPUT},
     }
     # rubocop:enable Style/MutableConstant
+
+    def iptables_packages(node)
+      if node.centos_min_version?(9) || node.fedora?
+        packages = ['iptables-legacy']
+      else
+        packages = ['iptables']
+      end
+
+      if node.ubuntu?
+        packages << 'iptables-persistent'
+      elsif node.centos_min_version?(9)
+        packages << 'iptables-nft-services'
+      else
+        packages << 'iptables-services'
+      end
+    end
 
     # Facebook, like others does not have NAT in their kernels. However many
     # people do, so provide an easy way to initialize the various structures

@@ -19,37 +19,58 @@
 # limitations under the License.
 #
 
-if node.centos_min_version?(9) || node.fedora?
-  packages = ['iptables-legacy']
-else
-  packages = ['iptables']
-end
+# firewalld/ufw conflicts with direct iptables management
+conflicting_package = value_for_platform(
+  'ubuntu' => { :default => 'ufw' },
+  :default => 'firewalld',
+)
 
-if node.ubuntu?
-  packages << 'iptables-persistent'
-elsif node.centos_min_version?(9)
-  packages << 'iptables-nft-services'
-else
-  packages << 'iptables-services'
-end
-
-package packages do
+service conflicting_package do
   only_if { node['fb_iptables']['manage_packages'] }
+  action [:stop, :disable]
+end
+
+package conflicting_package do
+  only_if { node['fb_iptables']['manage_packages'] }
+  options '--exclude kernel*' if node.fedora?
+  action :remove
+end
+
+package 'iptables packages' do
+  only_if do
+    node['fb_iptables']['manage_packages'] && !node['fb_iptables']['use_nft'] }
+  end
+  package_name lazy { FB::IPTables.packages(node) }
   action :upgrade
   notifies :run, 'execute[reload iptables]'
   notifies :run, 'execute[reload ip6tables]'
 end
 
+package 'nftables' do
+  only_if do
+    node['fb_iptables']['manage_packages'] && node['fb_iptables']['use_nft'] }
+  end
+  action :upgrade
+  notifies :run, 'execute[reload nftables]'
+end
+
+# These aren't packages or package related, but I believe they are
+# here so that packages.rb can be self-contained.
 execute 'reload iptables' do
-  only_if { node['fb_iptables']['enable'] }
+  only_if { node['fb_iptables']['enable'] && !node['fb_iptables']['use_nft'] }
   command '/usr/sbin/fb_iptables_reload 4 reload'
   action :nothing
   subscribes :run, 'package[osquery]'
 end
 
-## ip6tables ##
 execute 'reload ip6tables' do
-  only_if { node['fb_iptables']['enable'] }
+  only_if { node['fb_iptables']['enable'] && !node['fb_iptables']['use_nft'] }
   command '/usr/sbin/fb_iptables_reload 6 reload'
+  action :nothing
+end
+
+execute 'reload nftables' do
+  only_if { node['fb_iptables']['enable'] && node['fb_iptables']['use_nft'] }
+  command '/usr/sbin/fb_iptables_reload nft reload'
   action :nothing
 end
